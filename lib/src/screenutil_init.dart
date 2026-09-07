@@ -31,17 +31,20 @@ class RebuildFactors {
 
 class ScreenUtilInit extends StatefulWidget {
   /// A helper widget that initializes [ScreenUtil]
-  const ScreenUtilInit(
-      {Key? key,
-      required this.builder,
-      this.child,
-      this.rebuildFactor = RebuildFactors.size,
-      this.designSize = ScreenUtil.defaultSize,
-      this.splitScreenMode = false,
-      this.minTextAdapt = false,
-      this.useInheritedMediaQuery = false,
-      this.scaleByHeight = false})
-      : super(key: key);
+  const ScreenUtilInit({
+    Key? key,
+    required this.builder,
+    this.child,
+    this.rebuildFactor = RebuildFactors.size,
+    this.designSize = ScreenUtil.defaultSize,
+    this.unfoldedDesignSize,
+    this.foldedScreenWidth,
+    this.splitScreenMode = false,
+    this.minTextAdapt = false,
+    this.useInheritedMediaQuery = false,
+    this.scaleByHeight = false,
+    this.enableFoldWidthAdaptation = true,
+  }) : super(key: key);
 
   final ScreenUtilInitBuilder builder;
   final Widget? child;
@@ -49,10 +52,20 @@ class ScreenUtilInit extends StatefulWidget {
   final bool minTextAdapt;
   final bool useInheritedMediaQuery;
   final bool scaleByHeight;
+
+  /// Whether unfolded foldables apply the narrow width correction to `.w/.sp`.
+  /// Defaults to true. Fold metrics remain available when disabled.
+  final bool enableFoldWidthAdaptation;
   final RebuildFactor rebuildFactor;
 
   /// The [Size] of the device in the design draft, in dp
   final Size designSize;
+
+  /// 折叠展开状态使用的设计稿尺寸；未传时与 [designSize] 相同。
+  final Size? unfoldedDesignSize;
+
+  /// 原生层预取的收合屏幕实际逻辑宽度。
+  final double? foldedScreenWidth;
 
   @override
   State<ScreenUtilInit> createState() => _ScreenUtilInitState();
@@ -94,8 +107,12 @@ class _ScreenUtilInitState extends State<ScreenUtilInit>
 
   @override
   void didChangeMetrics() {
-    final old = _mediaQueryData!;
     final data = newData;
+    final old = _mediaQueryData;
+    if (old == null) {
+      _mediaQueryData = data;
+      return;
+    }
 
     if (widget.scaleByHeight || widget.rebuildFactor(old, data)) {
       _mediaQueryData = data;
@@ -127,9 +144,12 @@ class _ScreenUtilInitState extends State<ScreenUtilInit>
             ScreenUtil.init(
               __context,
               designSize: widget.designSize,
+              unfoldedDesignSize: widget.unfoldedDesignSize,
+              foldedScreenWidth: widget.foldedScreenWidth,
               splitScreenMode: widget.splitScreenMode,
               minTextAdapt: widget.minTextAdapt,
               scaleByHeight: widget.scaleByHeight,
+              enableFoldWidthAdaptation: widget.enableFoldWidthAdaptation,
             );
             final deviceData = MediaQuery.maybeOf(__context);
             final deviceSize = deviceData?.size ?? widget.designSize;
@@ -160,9 +180,12 @@ class _ScreenUtilInitState extends State<ScreenUtilInit>
     ScreenUtil.init(
       _context,
       designSize: widget.designSize,
+      unfoldedDesignSize: widget.unfoldedDesignSize,
+      foldedScreenWidth: widget.foldedScreenWidth,
       splitScreenMode: widget.splitScreenMode,
       minTextAdapt: widget.minTextAdapt,
       scaleByHeight: widget.scaleByHeight,
+      enableFoldWidthAdaptation: widget.enableFoldWidthAdaptation,
     );
     final deviceData = MediaQuery.maybeOf(_context);
     final deviceSize = deviceData?.size ?? widget.designSize;
