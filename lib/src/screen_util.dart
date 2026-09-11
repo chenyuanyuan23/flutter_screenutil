@@ -12,6 +12,8 @@ enum ScreenMetricsUpdateStatus { changed, unchanged, deferred, uninitialized }
 
 class ScreenUtil with WidgetsBindingObserver {
   static const Size defaultSize = Size(360, 690);
+  static const double _phoneShortestSideBreakpoint = 600;
+  static const double _wideFoldMinAspectRatio = 0.65;
   static ScreenUtil _instance = ScreenUtil._();
 
   /// UI设计中手机尺寸 , dp
@@ -35,6 +37,7 @@ class ScreenUtil with WidgetsBindingObserver {
   bool _isObservingMetrics = false;
   bool _metricsUpdateScheduled = false;
   bool _hasObservedFoldFeature = false;
+  bool _hasObservedWideFoldFeature = false;
   bool _hasObservedFoldedViewport = false;
   bool _hasMeasuredFoldedScreenWidth = false;
   bool _hasMeasuredUnfoldedScreenWidth = false;
@@ -244,12 +247,19 @@ class ScreenUtil with WidgetsBindingObserver {
       return ScreenMetricsUpdateStatus.deferred;
     }
 
+    _syncUiSizeForOrientation(orientation);
+
     final hasFoldFeature = usableFoldFeatures.isNotEmpty;
+    if (hasFoldFeature) _hasObservedFoldFeature = true;
+    final wideFoldFeatures = usableFoldFeatures
+        .where((feature) => _isWideBookFoldFeature(size, orientation, feature))
+        .toList(growable: false);
+    final hasWideFoldFeature = wideFoldFeatures.isNotEmpty;
     final prefetchedFoldedScreenWidth = _prefetchedFoldedScreenWidth;
     final hadPreviousMetrics = _viewportSize != Size.zero;
     final paneScreenWidth = _screenWidthForDisplayFeatures(
       size,
-      usableFoldFeatures,
+      wideFoldFeatures,
     );
 
     final samePortraitOrientation = hadPreviousMetrics &&
@@ -264,7 +274,8 @@ class ScreenUtil with WidgetsBindingObserver {
     // 就代表收合 -> 展开的动画已经开始。此时 viewport 通常早于 fold feature
     // 抵达；必须在第一帧先切换到展开设计稿，避免外层已移位、内部 `.w/.sp`
     // 却仍按收合设计稿放大的混合状态。
-    if (!hasFoldFeature &&
+    if (!hasWideFoldFeature &&
+        !hasFoldFeature &&
         samePortraitOrientation &&
         _hasObservedFoldedViewport &&
         _foldedScreenWidthOrientation == orientation &&
@@ -284,9 +295,10 @@ class ScreenUtil with WidgetsBindingObserver {
           : ScreenMetricsUpdateStatus.unchanged;
     }
 
-    if (!hasFoldFeature && hadPreviousMetrics) {
-      final widthGrowthReference =
-          _hasObservedFoldFeature ? _foldedScreenWidth : _viewportSize.width;
+    if (!hasWideFoldFeature && !hasFoldFeature && hadPreviousMetrics) {
+      final widthGrowthReference = _hasObservedWideFoldFeature
+          ? _foldedScreenWidth
+          : _viewportSize.width;
       final widthGrowthThreshold = max(
         widthGrowthReference * 1.35,
         widthGrowthReference + 120,
@@ -310,9 +322,9 @@ class ScreenUtil with WidgetsBindingObserver {
     }
 
     bool effectiveFoldOpen;
-    if (hasFoldFeature) {
+    if (hasWideFoldFeature) {
       _isExpandingBeforeFoldFeature = false;
-      if (!_hasObservedFoldFeature) {
+      if (!_hasObservedWideFoldFeature) {
         final previousWasRealFoldedViewport =
             hadPreviousMetrics && _viewportSize.width < size.width * 0.8;
         if (previousWasRealFoldedViewport) {
@@ -331,7 +343,7 @@ class ScreenUtil with WidgetsBindingObserver {
           _foldedScreenWidthOrientation = orientation;
           _hasMeasuredFoldedScreenWidth = false;
         }
-        _hasObservedFoldFeature = true;
+        _hasObservedWideFoldFeature = true;
       } else if (!_hasMeasuredFoldedScreenWidth) {
         // 尚未真的收合前，fold bounds 若仍在变动只保留观测过的最窄 pane。
         _foldedScreenWidth = _foldedScreenWidthOrientation == orientation
@@ -343,7 +355,7 @@ class ScreenUtil with WidgetsBindingObserver {
       _unfoldedScreenWidth = size.width;
       _hasMeasuredUnfoldedScreenWidth = true;
       effectiveFoldOpen = true;
-    } else if (_hasObservedFoldFeature) {
+    } else if (_hasObservedWideFoldFeature) {
       // 真正收合后，每次稳定 metrics 都使用当下 viewport 的实际宽度。
       _isExpandingBeforeFoldFeature = false;
       _foldedScreenWidth = size.width;
@@ -398,6 +410,17 @@ class ScreenUtil with WidgetsBindingObserver {
         : ScreenMetricsUpdateStatus.unchanged;
   }
 
+  void _syncUiSizeForOrientation(Orientation orientation) {
+    final uiSizeIsLandscape = _uiSize.width > _uiSize.height;
+    final viewportIsLandscape = orientation == Orientation.landscape;
+    if (_uiSize.width == _uiSize.height ||
+        uiSizeIsLandscape == viewportIsLandscape) {
+      return;
+    }
+
+    _uiSize = Size(_uiSize.height, _uiSize.width);
+  }
+
   bool _isFoldFeature(ui.DisplayFeature feature) =>
       feature.type == ui.DisplayFeatureType.fold ||
       feature.type == ui.DisplayFeatureType.hinge;
@@ -428,6 +451,27 @@ class ScreenUtil with WidgetsBindingObserver {
       }
       return false;
     }).toList(growable: false);
+  }
+
+  /// 只有书本式左右展开、且 viewport 已接近宽版比例时，才套用展开设计稿。
+  ///
+  /// 直向书本式装置的折线会垂直分隔左右 pane；旋转为横向后则会变成
+  /// 水平分隔。Flip 类上下折装置刚好相反，因此不会误用 1500 宽设计稿。
+  bool _isWideBookFoldFeature(
+    Size size,
+    Orientation orientation,
+    ui.DisplayFeature feature,
+  ) {
+    final normalizedAspectRatio = size.shortestSide / size.longestSide;
+    if (normalizedAspectRatio < _wideFoldMinAspectRatio) return false;
+
+    final bounds = feature.bounds;
+    final isVertical =
+        bounds.height >= size.height * 0.5 && bounds.width <= size.width * 0.25;
+    final isHorizontal =
+        bounds.width >= size.width * 0.5 && bounds.height <= size.height * 0.25;
+
+    return orientation == Orientation.portrait ? isVertical : isHorizontal;
   }
 
   double _screenWidthForDisplayFeatures(
@@ -574,7 +618,7 @@ class ScreenUtil with WidgetsBindingObserver {
   /// Whether [init] has produced the first usable metrics snapshot.
   bool get isInitialized => _isInitialized;
 
-  /// 目前系统是否回报 fold/hinge display feature。
+  /// 目前是否为可套用宽版设计稿的书本式折叠展开状态。
   bool get isFoldOpen => _isFoldOpen;
 
   /// 是否启用折叠展开时的窄版 `.w/.sp` 缩放修正。
@@ -605,11 +649,25 @@ class ScreenUtil with WidgetsBindingObserver {
   /// 收合态依 `designSize`，展开态依 `unfoldedDesignSize` 计算；两种状态
   /// 不共享实测缩放基准，因此启动路径不会改变 `.w/.sp` 的结果。
   double get scaleWidth {
+    if (_usesLegacyPhoneLandscapeScale) {
+      return _viewportSize.shortestSide / _uiSize.shortestSide;
+    }
+
     final designWidth = _enableFoldWidthAdaptation && _isFoldOpen
         ? _unfoldedUiSize.width
         : _uiSize.width;
     return viewportWidth / designWidth;
   }
+
+  /// 一般手机横屏沿用旧版旋转前的直屏宽度比例。
+  ///
+  /// `shortestSide < 600` 只用于区分手机与平板，不参与折叠状态判断；目前
+  /// 处于折叠展开态时，仍以折叠设计稿的规则计算。
+  bool get _usesLegacyPhoneLandscapeScale =>
+      _orientation == Orientation.landscape &&
+      !_isFoldOpen &&
+      _prefetchedFoldedScreenWidth == null &&
+      _viewportSize.shortestSide < _phoneShortestSideBreakpoint;
 
   ///  /// The ratio of actual height to UI design
   double get scaleHeight =>
