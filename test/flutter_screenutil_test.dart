@@ -223,6 +223,84 @@ void main() {
       expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
       expect(100.w, moreOrLessEquals(100 * 638.67 / 1500));
     });
+
+    testWidgets('展开态内屏横竖翻转时折线缺失或仍是旧方向，维持展开', (tester) async {
+      const innerLandscape = Size(690.67, 638.67);
+      const innerPortrait = Size(638.67, 720);
+      const landscapeFold = DisplayFeature(
+        bounds: Rect.fromLTWH(0, 318.33, 690.67, 2),
+        type: DisplayFeatureType.fold,
+        state: DisplayFeatureState.postureFlat,
+      );
+      const portraitFold = DisplayFeature(
+        bounds: Rect.fromLTWH(318.33, 0, 2, 720),
+        type: DisplayFeatureType.fold,
+        state: DisplayFeatureState.postureFlat,
+      );
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(807.67, 360);
+      tester.view.displayFeatures = const [];
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetDisplayFeatures);
+
+      await tester.pumpWidget(const _InitializeScreenUtilOnce());
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+
+      // 外屏横屏观看中展开：内屏仍锁横屏，书本折线为水平方向。
+      tester.view.physicalSize = innerLandscape;
+      tester.view.displayFeatures = const [landscapeFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+
+      // 回竖屏那一帧 viewport 已转向，折线还是旋转前的水平方向。
+      tester.view.physicalSize = innerPortrait;
+      await tester.pump();
+      expect(ScreenUtil().orientation, Orientation.portrait);
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
+      expect(ScreenUtil().screenWidth, moreOrLessEquals(750 * 638.67 / 1500));
+
+      // 新方向的垂直折线到达后照常维持展开。
+      tester.view.displayFeatures = const [portraitFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
+
+      // 反方向：竖屏转横屏那一帧折线还是旋转前的垂直方向。
+      tester.view.physicalSize = innerLandscape;
+      await tester.pump();
+      expect(ScreenUtil().orientation, Orientation.landscape);
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      tester.view.displayFeatures = const [landscapeFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      tester.view.physicalSize = innerPortrait;
+      tester.view.displayFeatures = const [portraitFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+
+      // 翻转帧完全没有折线：本次进程已观测过书本折线，同样维持展开。
+      tester.view.physicalSize = innerLandscape;
+      tester.view.displayFeatures = const [];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      tester.view.physicalSize = innerPortrait;
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
+
+      // 合上后的外屏旋转不受影响：短边不足 600，按收合实宽。
+      tester.view.physicalSize = const Size(840, 360);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+      expect(ScreenUtil().screenWidth, 840);
+      tester.view.physicalSize = const Size(360, 840);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+      expect(ScreenUtil().screenWidth, 360);
+    });
   });
 }
 

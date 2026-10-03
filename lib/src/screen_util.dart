@@ -38,6 +38,8 @@ class ScreenUtil with WidgetsBindingObserver {
   bool _metricsUpdateScheduled = false;
   bool _hasObservedFoldFeature = false;
   bool _hasObservedWideFoldFeature = false;
+  /// 展开态内屏横竖翻转后，等待新方向书本折线（见 [_commitScreenMetrics]）。
+  bool _isAwaitingRotatedFoldFeature = false;
   bool _hasObservedFoldedViewport = false;
   bool _hasMeasuredFoldedScreenWidth = false;
   bool _hasMeasuredUnfoldedScreenWidth = false;
@@ -242,6 +244,43 @@ class ScreenUtil with WidgetsBindingObserver {
 
     final rawFoldFeatures = displayFeatures.where(_isFoldFeature);
     final usableFoldFeatures = _usableFoldFeatures(size, displayFeatures);
+
+    // 展开态内屏横竖翻转：viewport 已转向，系统重发的 fold feature 常晚一拍，
+    // 这一帧要么没有折线、要么还是旋转前方向的折线。旋转不改变折叠态；照常
+    // 往下走会落进「真正收合」分支，发布收合并把内屏宽记成收合宽，这期间新建
+    // 的组件就按收合设计宽把 `.w` 放大一倍（vivo X Fold 横屏观看中展开后回竖屏）。
+    final hasCurrentBookFold = usableFoldFeatures
+        .any((feature) => _isWideBookFoldFeature(size, orientation, feature));
+    final rotatedWithoutCurrentFold = !hasCurrentBookFold &&
+        _isUnfoldedInnerScreenRotation(
+          size,
+          orientation,
+          hasRawFoldFeature: rawFoldFeatures.isNotEmpty,
+        );
+    // 同一次翻转后的后续提交（同尺寸同方向、新方向折线仍未到）沿用这次判定，
+    // 直到新折线到达或 viewport 再变化。
+    final stillAwaitingRotatedFold = _isAwaitingRotatedFoldFeature &&
+        !hasCurrentBookFold &&
+        size == _viewportSize &&
+        orientation == _orientation;
+    if (rotatedWithoutCurrentFold || stillAwaitingRotatedFold) {
+      _isAwaitingRotatedFoldFeature = true;
+      _syncUiSizeForOrientation(orientation);
+      final changed =
+          _viewportSize != size || _orientation != orientation || !_isFoldOpen;
+      _isExpandingBeforeFoldFeature = false;
+      _unfoldedScreenWidth = size.width;
+      _hasMeasuredUnfoldedScreenWidth = true;
+      _viewportSize = size;
+      _orientation = orientation;
+      _isFoldOpen = true;
+      return changed
+          ? ScreenMetricsUpdateStatus.changed
+          : ScreenMetricsUpdateStatus.unchanged;
+    }
+
+    _isAwaitingRotatedFoldFeature = false;
+
     if (rawFoldFeatures.isNotEmpty && usableFoldFeatures.isEmpty) {
       // fold bounds 还属于上一个 viewport，不能拿来推算 pane 宽度。
       return ScreenMetricsUpdateStatus.deferred;
@@ -408,6 +447,20 @@ class ScreenUtil with WidgetsBindingObserver {
     return changed
         ? ScreenMetricsUpdateStatus.changed
         : ScreenMetricsUpdateStatus.unchanged;
+  }
+
+  /// 横竖翻转且新 viewport 是近方形大屏（只有折叠机内屏），当前却没有符合
+  /// 现在方向的书本折线：有折线（旧方向）或本次进程观测过书本折线，才视为
+  /// 展开态旋转。折叠外屏短边不足 600、一般平板没有折线证据，都不会进来。
+  bool _isUnfoldedInnerScreenRotation(
+    Size size,
+    Orientation orientation, {
+    required bool hasRawFoldFeature,
+  }) {
+    if (_viewportSize == Size.zero || _orientation == orientation) return false;
+    if (!hasRawFoldFeature && !_hasObservedWideFoldFeature) return false;
+    if (size.shortestSide < _phoneShortestSideBreakpoint) return false;
+    return size.shortestSide / size.longestSide >= _wideFoldMinAspectRatio;
   }
 
   void _syncUiSizeForOrientation(Orientation orientation) {
