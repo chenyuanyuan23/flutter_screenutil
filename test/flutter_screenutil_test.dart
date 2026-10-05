@@ -301,6 +301,74 @@ void main() {
       expect(ScreenUtil().isFoldOpen, isFalse);
       expect(ScreenUtil().screenWidth, 360);
     });
+
+    testWidgets('翻转后等新折线期间系统栏再撑高 viewport，仍维持展开', (tester) async {
+      // QA-PV0QNG（vivo X Fold）：外屏横屏观看中展开 → 自动回竖屏，
+      // 638.67x687（折线未到）→ 638.67x720（系统栏撑高，折线仍未到）→ 折线到达。
+      // 第二帧曾被判成收合，界面按收合设计宽放大约 0.3s。
+      const portraitFold = DisplayFeature(
+        bounds: Rect.fromLTWH(318.33, 0, 2, 720),
+        type: DisplayFeatureType.fold,
+        state: DisplayFeatureState.postureFlat,
+      );
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(360, 840);
+      tester.view.displayFeatures = const [];
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetDisplayFeatures);
+
+      // 单例跨用例共享：先落到外屏收合态，不继承上一个用例的闩锁/收合宽。
+      await tester.pumpWidget(const _InitializeScreenUtilOnce());
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+
+      tester.view.physicalSize = const Size(638.67, 720);
+      tester.view.displayFeatures = const [portraitFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+
+      // 合上：外屏竖屏 → 外屏横屏观看。
+      tester.view.physicalSize = const Size(360, 840);
+      tester.view.displayFeatures = const [];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+      tester.view.physicalSize = const Size(807.67, 360);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+
+      // 横屏中展开：内屏先按横屏给出，折线未到。
+      tester.view.physicalSize = const Size(690.67, 638.67);
+      await tester.pump();
+
+      // 自动回竖屏，折线仍未到。
+      tester.view.physicalSize = const Size(638.67, 687);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+
+      // 同方向系统栏撑高 viewport，折线仍未到：不能落进收合分支。
+      tester.view.physicalSize = const Size(638.67, 720);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
+
+      tester.view.displayFeatures = const [portraitFold];
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      expect(ScreenUtil().scaleWidth, moreOrLessEquals(638.67 / 1500));
+
+      // 等折线期间真的合上：外屏短边不足 600，照常收合。
+      tester.view.physicalSize = const Size(690.67, 638.67);
+      tester.view.displayFeatures = const [];
+      await tester.pump();
+      tester.view.physicalSize = const Size(638.67, 687);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isTrue);
+      tester.view.physicalSize = const Size(360, 840);
+      await tester.pump();
+      expect(ScreenUtil().isFoldOpen, isFalse);
+      expect(ScreenUtil().screenWidth, 360);
+    });
   });
 }
 

@@ -257,12 +257,14 @@ class ScreenUtil with WidgetsBindingObserver {
           orientation,
           hasRawFoldFeature: rawFoldFeatures.isNotEmpty,
         );
-    // 同一次翻转后的后续提交（同尺寸同方向、新方向折线仍未到）沿用这次判定，
-    // 直到新折线到达或 viewport 再变化。
+    // 同一次翻转后的后续提交（同方向、新方向折线仍未到）沿用这次判定，直到新
+    // 折线到达或 viewport 不再是内屏尺寸。翻转后系统栏常再撑一次高度
+    // （vivo X Fold 638.67x687 → 638.67x720），不能因尺寸变了就当成收合；
+    // 真合上时外屏短边不足 600，照常释放。
     final stillAwaitingRotatedFold = _isAwaitingRotatedFoldFeature &&
         !hasCurrentBookFold &&
-        size == _viewportSize &&
-        orientation == _orientation;
+        orientation == _orientation &&
+        _isInnerScreenSize(size);
     if (rotatedWithoutCurrentFold || stillAwaitingRotatedFold) {
       _isAwaitingRotatedFoldFeature = true;
       _syncUiSizeForOrientation(orientation);
@@ -459,6 +461,11 @@ class ScreenUtil with WidgetsBindingObserver {
   }) {
     if (_viewportSize == Size.zero || _orientation == orientation) return false;
     if (!hasRawFoldFeature && !_hasObservedWideFoldFeature) return false;
+    return _isInnerScreenSize(size);
+  }
+
+  /// 近方形大屏：短边不小于 600 且短/长不小于 0.65（只有折叠机内屏与平板）。
+  bool _isInnerScreenSize(Size size) {
     if (size.shortestSide < _phoneShortestSideBreakpoint) return false;
     return size.shortestSide / size.longestSide >= _wideFoldMinAspectRatio;
   }
