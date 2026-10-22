@@ -3,10 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  tearDown(() {
-    ScreenUtil.setPlatformFoldResolver(null);
-    ScreenUtil.innerScalingEnabled = false;
-  });
+  tearDown(ScreenUtil.resetPlatformFoldForTesting);
 
   void setView(WidgetTester tester, Size size) {
     tester.view.devicePixelRatio = 1;
@@ -140,6 +137,25 @@ void main() {
 
     expect(ScreenUtil().isFoldOpen, isTrue);
     expect(ScreenUtil().scaleWidth, moreOrLessEquals(669 / 1500));
+  });
+
+  testWidgets('resetPlatformFoldForTesting 清掉判定器与展开态', (tester) async {
+    setView(tester, const Size(669, 951));
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_host());
+    await tester.pump();
+
+    ScreenUtil.innerScalingEnabled = true;
+    ScreenUtil.setPlatformFoldResolver((_) => true);
+    ScreenUtil.syncPlatformMetrics(const Size(669, 951));
+    expect(ScreenUtil().isFoldOpen, isTrue);
+
+    ScreenUtil.resetPlatformFoldForTesting();
+    expect(ScreenUtil.innerScalingEnabled, isFalse);
+    expect(ScreenUtil().isFoldOpen, isFalse);
+    expect(ScreenUtil.syncPlatformMetrics(const Size(669, 951)), isFalse);
   });
 
   testWidgets('取消判定器后恢复按 displayFeatures 推断', (tester) async {

@@ -247,6 +247,17 @@ class ScreenUtil with WidgetsBindingObserver {
       _instance._innerScalingEnabled = value;
   static bool get innerScalingEnabled => _instance._innerScalingEnabled;
 
+  /// 测试用：卸下平台折叠判定器并清掉它带来的展开态，回到按 displayFeatures 推断。
+  @visibleForTesting
+  static void resetPlatformFoldForTesting() {
+    _instance
+      .._platformFoldResolver = null
+      .._innerScalingEnabled = false
+      .._isFoldOpen = false
+      .._isAwaitingRotatedFoldFeature = false
+      .._isExpandingBeforeFoldFeature = false;
+  }
+
   /// 已安装判定器时按 [viewport] 立即提交一次尺寸与折叠态；
   /// 返回 `.w/.sp` 等取值是否因此变化。未初始化或未安装判定器时返回 false。
   static bool syncPlatformMetrics(Size viewport) {
