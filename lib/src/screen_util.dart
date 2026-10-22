@@ -46,6 +46,12 @@ class ScreenUtil with WidgetsBindingObserver {
   bool _isFoldOpen = false;
   bool _isExpandingBeforeFoldFeature = false;
 
+  // ===== 平台折叠判定器（iPhone Duo 等没有 displayFeatures 的折叠设备）=====
+  // App 层安装判定器后，展开/合上只认判定器，不再走 displayFeatures 推断；
+  // 未安装时（Android 折叠机、普通手机、平板）以下全部不生效，行为与原先一致。
+  bool? Function(Size size)? _platformFoldResolver;
+  bool _innerScalingEnabled = false;
+
   ScreenUtil._();
 
   factory ScreenUtil() {
@@ -227,6 +233,40 @@ class ScreenUtil with WidgetsBindingObserver {
         : _isFoldOpen;
   }
 
+  /// 安装平台折叠判定器：返回 true=展开、false=合上、null=几何未就绪（保持上次的值）。
+  /// 传 null 取消，恢复按 displayFeatures 推断。
+  static void setPlatformFoldResolver(bool? Function(Size size)? resolver) {
+    _instance._platformFoldResolver = resolver;
+    if (resolver != null && _instance._isInitialized) {
+      _instance._ensureMetricsObserver(WidgetsBinding.instance);
+    }
+  }
+
+  /// 判定器判为展开时是否切到 `unfoldedDesignSize` 缩放；关闭时展开态按收合设计稿缩放。
+  static set innerScalingEnabled(bool value) =>
+      _instance._innerScalingEnabled = value;
+  static bool get innerScalingEnabled => _instance._innerScalingEnabled;
+
+  /// 已安装判定器时按 [viewport] 立即提交一次尺寸与折叠态；
+  /// 返回 `.w/.sp` 等取值是否因此变化。未初始化或未安装判定器时返回 false。
+  static bool syncPlatformMetrics(Size viewport) {
+    if (!_instance._isInitialized ||
+        _instance._platformFoldResolver == null ||
+        viewport.isEmpty) {
+      return false;
+    }
+    final status = _instance._commitScreenMetrics(
+      viewport,
+      viewport.width > viewport.height
+          ? Orientation.landscape
+          : Orientation.portrait,
+      const <ui.DisplayFeature>[],
+    );
+    if (status != ScreenMetricsUpdateStatus.changed) return false;
+    _instance._markRegisteredElementsNeedsBuild();
+    return true;
+  }
+
   void _ensureMetricsObserver(WidgetsBinding binding) {
     if (_isObservingMetrics) return;
     binding.addObserver(this);
@@ -240,6 +280,18 @@ class ScreenUtil with WidgetsBindingObserver {
   ) {
     if (size.isEmpty || size.width <= 0 || size.height <= 0) {
       return ScreenMetricsUpdateStatus.deferred;
+    }
+
+    final platformResolver = _platformFoldResolver;
+    if (platformResolver != null) {
+      final platformFoldOpen = platformResolver(size);
+      if (platformFoldOpen != null) {
+        return _commitPlatformFoldMetrics(size, orientation, platformFoldOpen);
+      }
+      // 几何未就绪：已有可用尺寸时保持上次的值；从未提交过则按下面的原逻辑初始化。
+      if (_viewportSize != Size.zero) {
+        return ScreenMetricsUpdateStatus.deferred;
+      }
     }
 
     final rawFoldFeatures = displayFeatures.where(_isFoldFeature);
@@ -443,6 +495,45 @@ class ScreenUtil with WidgetsBindingObserver {
         _orientation != orientation ||
         _isFoldOpen != effectiveFoldOpen;
 
+    _viewportSize = size;
+    _orientation = orientation;
+    _isFoldOpen = effectiveFoldOpen;
+    return changed
+        ? ScreenMetricsUpdateStatus.changed
+        : ScreenMetricsUpdateStatus.unchanged;
+  }
+
+  /// 平台判定器给出明确结论时的提交：展开且启用内屏缩放 → 展开设计稿；
+  /// 其余（合上、或展开但未启用内屏缩放）→ 收合设计稿，宽度取当前 viewport。
+  ScreenMetricsUpdateStatus _commitPlatformFoldMetrics(
+    Size size,
+    Orientation orientation,
+    bool platformFoldOpen,
+  ) {
+    _isAwaitingRotatedFoldFeature = false;
+    _isExpandingBeforeFoldFeature = false;
+    _syncUiSizeForOrientation(orientation);
+
+    final effectiveFoldOpen = platformFoldOpen && _innerScalingEnabled;
+    if (effectiveFoldOpen) {
+      _unfoldedScreenWidth = size.width;
+      _hasMeasuredUnfoldedScreenWidth = true;
+      if (_viewportSize == Size.zero) {
+        _foldedScreenWidth = size.width;
+        _foldedScreenWidthOrientation = orientation;
+      }
+    } else {
+      _foldedScreenWidth = size.width;
+      _foldedScreenWidthOrientation = orientation;
+      _hasMeasuredFoldedScreenWidth = true;
+      _hasObservedFoldedViewport = true;
+      if (_viewportSize == Size.zero) _unfoldedScreenWidth = size.width;
+    }
+
+    final changed = _viewportSize == Size.zero ||
+        _viewportSize != size ||
+        _orientation != orientation ||
+        _isFoldOpen != effectiveFoldOpen;
     _viewportSize = size;
     _orientation = orientation;
     _isFoldOpen = effectiveFoldOpen;
